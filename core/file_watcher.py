@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from collections import OrderedDict
@@ -95,7 +96,13 @@ class FileWatcher:
         key = (rule_id, str(path.resolve()))
         with self._lock:
             if key not in self._processing:
-                self._pending[key] = time.monotonic()
+                changed_at = time.monotonic()
+                previous = self._pending.get(key)
+                if previous is not None and changed_at <= previous:
+                    # Some Windows hosts expose a coarse monotonic clock.  A
+                    # repeated event must still restart the debounce window.
+                    changed_at = math.nextafter(previous, math.inf)
+                self._pending[key] = changed_at
 
     def _queue_loop(self) -> None:
         while not self._stop_event.wait(0.25):
