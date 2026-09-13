@@ -131,6 +131,30 @@ def test_originals_can_be_moved_without_overwrite(tmp_path: Path, old_file) -> N
     assert (move_to / "Test" / "nested" / "old (2).txt").exists()
 
 
+def test_verified_archive_is_preserved_when_moving_original_fails(tmp_path: Path, old_file, monkeypatch) -> None:
+    source = tmp_path / "source"
+    original = old_file(source / "important.txt", b"important")
+
+    def fail_move(*_args, **_kwargs):
+        raise PermissionError("locked by another process")
+
+    monkeypatch.setattr("core.archive_engine.shutil.move", fail_move)
+    result = ArchiveEngine().run(
+        make_rule(
+            source,
+            tmp_path / "out",
+            grouping=Grouping.SINGLE,
+            original_action=OriginalAction.MOVE,
+            move_destination=str(tmp_path / "moved"),
+        )
+    )
+
+    assert result.success
+    assert result.warnings
+    assert result.output_paths[0].is_file()
+    assert original.is_file()
+
+
 def test_cancelled_archive_keeps_originals_and_no_output(tmp_path: Path, old_file) -> None:
     source = tmp_path / "source"
     file_path = old_file(source / "important.txt", b"important")

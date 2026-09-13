@@ -140,7 +140,21 @@ class ArchiveEngine:
             if cancel_event.is_set():
                 raise _Cancelled
             self._verify_sources_unchanged(preview.included)
-            self._handle_originals(rule, preview.included)
+            try:
+                self._handle_originals(rule, preview.included)
+            except Exception as exc:
+                # Every archive is already complete and verified at this point.
+                # Never delete those recovery copies when a later move/delete of
+                # an original fails (for example because antivirus locked it).
+                LOGGER.exception("Archive created, but original post-processing failed")
+                return OperationResult(
+                    True,
+                    "Архив создан и проверен, но действие с оригиналами завершено не полностью.",
+                    files_count=len(preview.included),
+                    bytes_count=preview.total_size,
+                    output_paths=created,
+                    warnings=[f"Архивы сохранены. Проверьте оригиналы вручную: {exc}"],
+                )
             return OperationResult(
                 True,
                 f"Архивирование завершено: {len(preview.included)} файлов.",

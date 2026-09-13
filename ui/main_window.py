@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import logging
-import os
 import sys
-from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QThreadPool, QTimer, QUrl, Signal
@@ -11,7 +9,6 @@ from PySide6.QtGui import QCloseEvent, QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
-    QFileDialog,
     QHBoxLayout,
     QMainWindow,
     QMessageBox,
@@ -253,11 +250,11 @@ class MainWindow(QMainWindow):
             self.scheduler.mark_finished(rule.id)
             return
         if preview and self.config_service.config.show_preview:
-            self._load_preview(rule)
+            self._load_preview(rule, source)
             return
-        self._run_archive_worker(rule)
+        self._run_archive_worker(rule, source)
 
-    def _load_preview(self, rule: ArchiveRule) -> None:
+    def _load_preview(self, rule: ArchiveRule, source: str = "manual") -> None:
         key = f"preview:{rule.id}"
         if key in self._workers:
             return
@@ -266,7 +263,7 @@ class MainWindow(QMainWindow):
         dialog.setWindowModality(Qt.WindowModality.WindowModal)
         worker = OperationWorker(lambda _progress, _cancel: self.archive_engine.preview(rule))
         worker.signals.result.connect(
-            lambda preview: None if worker.cancel_event.is_set() else self._preview_ready(rule, preview)
+            lambda preview: None if worker.cancel_event.is_set() else self._preview_ready(rule, preview, source)
         )
         worker.signals.error.connect(lambda message: QMessageBox.warning(self, "Не удалось создать предпросмотр", message))
         worker.signals.finished.connect(lambda: self._finish_worker(key))
@@ -276,21 +273,21 @@ class MainWindow(QMainWindow):
         dialog.show()
         self.thread_pool.start(worker)
 
-    def _preview_ready(self, rule: ArchiveRule, preview) -> None:
+    def _preview_ready(self, rule: ArchiveRule, preview, source: str = "manual") -> None:
         if not preview.included:
             QMessageBox.information(self, "AutoArchive", "Подходящих файлов не найдено.")
             return
         if PreviewDialog(preview, rule, self).exec() == QDialog.DialogCode.Accepted:
-            self._run_archive_worker(rule)
+            self._run_archive_worker(rule, source)
 
-    def _run_archive_worker(self, rule: ArchiveRule) -> None:
+    def _run_archive_worker(self, rule: ArchiveRule, source: str = "manual") -> None:
         key = f"archive:{rule.id}"
         if key in self._workers:
             return
         dialog = ProgressDialog(f"Архивация — {rule.name}", self)
         worker = OperationWorker(lambda progress, cancel: self.archive_engine.run(rule, progress, cancel))
         worker.signals.progress.connect(dialog.update_progress)
-        worker.signals.result.connect(lambda result: self._archive_done(rule, result))
+        worker.signals.result.connect(lambda result: self._archive_done(rule, result, source))
         worker.signals.error.connect(
             lambda message: self._operation_error(
                 rule.id, rule.name, HistoryKind.ARCHIVE, message, show_dialog=source == "manual"
@@ -303,7 +300,7 @@ class MainWindow(QMainWindow):
         dialog.show()
         self.thread_pool.start(worker)
 
-    def _archive_done(self, rule: ArchiveRule, result: OperationResult) -> None:
+    def _archive_done(self, rule: ArchiveRule, result: OperationResult, source: str = "manual") -> None:
         if result.success:
             rule.last_run = utc_now_iso()
             rule.processed_files += result.files_count
@@ -311,9 +308,11 @@ class MainWindow(QMainWindow):
             self.rules.save_archive(rule)
         self.history_service.add(
             HistoryEntry(
-                HistoryKind.ARCHIVE if result.success else HistoryKind.WARNING,
-                "Архивировано" if result.success else "Архивация отменена",
-                result.message,
+                HistoryKind.WARNING if result.warnings or not result.success else HistoryKind.ARCHIVE,
+                "Архивировано с предупреждением"
+                if result.warnings
+                else ("Архивировано" if result.success else "Архивация отменена"),
+                "\n".join([result.message, *result.warnings]),
                 result.success,
                 files_count=result.files_count,
                 bytes_count=result.bytes_count,
@@ -323,6 +322,8 @@ class MainWindow(QMainWindow):
         if result.success and self.config_service.config.notifications_success:
             outputs = ", ".join(path.name for path in result.output_paths)
             self.notifications.show("SleepArchive — архив создан", f"{result.files_count} файлов\n{outputs}", key=f"archive:{rule.id}:{rule.last_run}")
+        if result.warnings and source == "manual":
+            QMessageBox.warning(self, "Архив создан с предупреждением", "\n\n".join([result.message, *result.warnings]))
         self.refresh_all()
 
     def run_extract_rule(self, rule_id: str) -> None:

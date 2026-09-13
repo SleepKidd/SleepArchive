@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtGui import QAction, QIcon
-from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 
 class TrayService:
@@ -56,4 +56,3 @@ class TrayService:
         self.extract_status.setText(f"AutoExtract: {state}")
         self.pause_action.setText("Возобновить автоматизацию" if paused else "Приостановить автоматизацию")
         self.icon.setToolTip(f"SleepArchive — {state}")
-
