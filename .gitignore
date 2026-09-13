@@ -1,8 +1,9 @@
 .venv/
 __pycache__/
 *.py[cod]
+*.spec
+!SleepArchive.spec
 .pytest_cache/
 build/
 dist/
 *.sleeparchive_tmp
-
